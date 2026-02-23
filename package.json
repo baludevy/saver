@@ -1,0 +1,21 @@
+{
+	"dependencies": {
+		"discord.js": "^14.25.1",
+		"uuid": "^13.0.0"
+	},
+	"name": "saver",
+	"module": "index.ts",
+	"type": "module",
+	"private": true,
+	"devDependencies": {
+		"@types/bun": "latest"
+	},
+	"peerDependencies": {
+		"typescript": "^5"
+	},
+	"scripts": {
+		"dev": "bun --watch src/index.ts",
+		"build": "bunx tsc -p tsconfig.json",
+		"start": "bun dist/index.js"
+	}
+}
