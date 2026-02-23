@@ -18,7 +18,7 @@ type Command = {
 	execute: (interaction: ChatInputCommandInteraction) => Promise<void>;
 };
 
-const TARGET_SIZE_MB = 24.0;
+const TARGET_SIZE_MB = 8.0;
 const TARGET_SIZE_BYTES = TARGET_SIZE_MB * 1024 * 1024;
 
 const command: Command = {
