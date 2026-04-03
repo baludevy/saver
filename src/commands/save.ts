@@ -11,7 +11,6 @@ import { runCommand, spawnProcess } from "@/utils/shell";
 import {
 	getMediaDuration,
 	getBestEncoder,
-	calculateVideoBitrate,
 	shouldCompress,
 } from "@/utils/media";
 
@@ -19,6 +18,8 @@ type Command = {
 	data: RESTPostAPIApplicationCommandsJSONBody;
 	execute: (interaction: ChatInputCommandInteraction) => Promise<void>;
 };
+
+const MAX_SIZE = 8 * 1024 * 1024;
 
 const command: Command = {
 	data: {
@@ -38,7 +39,11 @@ const command: Command = {
 
 	async execute(i: ChatInputCommandInteraction) {
 		const url = i.options.getString("url", true);
-		const workDir = await fs.mkdtemp(path.join(os.tmpdir(), "bot_dl_"));
+
+		const baseTmp = process.platform === "linux" ? "/dev/shm" : os.tmpdir();
+
+		const workDir = await fs.mkdtemp(path.join(baseTmp, "bot_dl_"));
+
 		const inputPath = path.join(workDir, "input.mp4");
 		const outputPath = path.join(workDir, "output.mp4");
 
@@ -48,21 +53,37 @@ const command: Command = {
 			await i.editReply({ content: "downloading video..." });
 
 			await runCommand(
-				`yt-dlp --no-playlist -f "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b" --merge-output-format mp4 -o "${inputPath}" "${url}"`,
+				`yt-dlp --no-playlist -S "res:720" -f "b[ext=mp4]/bv*[ext=mp4]+ba[ext=m4a]/b" -o "${inputPath}" "${url}"`,
 			);
 
-			const duration = await getMediaDuration(inputPath);
 			let finalPath = inputPath;
 
-			if (await shouldCompress(inputPath)) {
+			const stats = await fs.stat(inputPath);
+
+			if (stats.size > MAX_SIZE && (await shouldCompress(inputPath))) {
 				await i.editReply({ content: "compressing video..." });
 
 				const encoder = await getBestEncoder();
-				const videoBitrate = calculateVideoBitrate(duration);
-				const vParams =
-					encoder === "h264_nvenc"
-						? ["-preset", "p1", "-tune", "ll"]
-						: ["-preset", "ultrafast"];
+
+				// duration only needed if you use bitrate logic
+				const duration = await getMediaDuration(inputPath);
+
+				const isNVENC = encoder.includes("nvenc");
+
+				const videoArgs = isNVENC
+					? [
+							"-c:v",
+							encoder,
+							"-preset",
+							"p1",
+							"-tune",
+							"ll",
+							"-rc",
+							"vbr",
+							"-cq",
+							"28",
+						]
+					: ["-c:v", encoder, "-preset", "ultrafast", "-crf", "30"];
 
 				await spawnProcess("ffmpeg", [
 					"-y",
@@ -70,21 +91,16 @@ const command: Command = {
 					"auto",
 					"-i",
 					inputPath,
-					"-c:v",
-					encoder,
-					"-b:v",
-					videoBitrate.toString(),
-					...vParams,
+					...videoArgs,
 					"-c:a",
 					"aac",
 					"-b:a",
 					"128k",
-					"-map_metadata",
-					"-1",
 					"-movflags",
 					"+faststart",
 					outputPath,
 				]);
+
 				finalPath = outputPath;
 			}
 
@@ -95,15 +111,18 @@ const command: Command = {
 			});
 
 			await i.followUp({
-				content: `<${url}>`,
+				content: `${i.user} downloaded\n<${url}>`,
 				files: [attachment],
 			});
 
 			await i.deleteReply();
 		} catch (err) {
 			const errorMessage = err instanceof Error ? err.message : String(err);
+
 			if (i.deferred || i.replied) {
-				await i.editReply({ content: `error: \`${errorMessage}\`` });
+				await i.editReply({
+					content: `error: \`${errorMessage}\``,
+				});
 			}
 		} finally {
 			await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
